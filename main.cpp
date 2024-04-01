@@ -1,4 +1,3 @@
-
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -7,10 +6,13 @@
 #include <map>
 #include "include/auth.h"
 #include "src/ProgressBar.h"
+#include "include/cmdline.h"
 
 #ifdef _WIN32
 #include <windows.h>
 #endif
+
+#define DEFALT_SAVED_PATH "./2fakey.key"
 
 void copyToClipboard(const std::string &content)
 {
@@ -50,213 +52,199 @@ void copyToClipboard(const std::string &content)
 
 int main(int argc, char *argv[])
 {
-    std::string fileName = "/private/etc/2fa/2fakey.key";
-    std::vector<std::string> arguments(argv + 1, argv + argc);
-    std::map<std::string, std::string> options;
+    cmdline::parser parser;
+    parser.add("ls",'l',"list the names of all keys in the keychain");
+    parser.add("values",'v',"list all saved key token values");
+    parser.add<std::string>("file",'f',"specify the file for saving the data",false,DEFALT_SAVED_PATH);
+    parser.add<std::string>("auth",'a',"specify the name and save it with its authentication code",false,"");
+    parser.add<std::string>("name",'n',"search the local key file for a given name and prints the two-factor authentication code corresponding to that name",false,"");
+    parser.add("copy",'c',"copy the code to the system clipboard");
+    parser.add("help",'h',"print this message");
+    
+    parser.parse_check(argc, argv);
+
+    std::string fileName = parser.get<std::string>("file");
     std::string secret = "";
 
-    if (argc > 1)
+    if (parser.exist("help"))
     {
-
-        for (size_t i = 0; i < arguments.size(); ++i)
-        {
-            // 如果参数以 "-" 开头
-            if (arguments[i].size() > 1 && arguments[i][0] == '-')
-            {
-                // 如果是 -all -c, -l 选项，直接存储，不需要检查后面是否有参数
-                if (arguments[i] == "-all" || arguments[i] == "-c" || arguments[i] == "-l")
-                {
-                    options[arguments[i]] = "";
-                }
-                else if (i + 1 < arguments.size())
-                {
-                    // 如果后面还有参数，存储选项和值
-                    options[arguments[i]] = arguments[i + 1];
-                    // 跳过参数值
-                    ++i;
-                }
-                else
-                {
-                    // 如果后面没有参数且不是 -c，输出错误信息
-                    std::cout << "Option " << arguments[i] << " requires a value." << std::endl;
-                }
-            }
-            else
-            {
-                // 如果不是以 "-" 开头，输出错误信息
-                std::cout << "Unknown option or missing value: " << arguments[i] << std::endl;
-            }
-        }
-        // 根据选项执行不同的操作
-        if (options.count("-all"))
-        {
-
-            struct Credential
-            {
-                std::string name;
-                std::string secret;
-            };
-            std::ifstream inputFile(fileName);
-            std::vector<Credential> credentials;
-
-            if (!inputFile.is_open())
-            {
-                std::cerr << "Unable to open the file." << std::endl;
-            }
-            
-            std::string line;
-            Credential currentCredential;
-
-            while (std::getline(inputFile, line))
-            {
-                size_t namePos = line.find("name:");
-                if (namePos != std::string::npos)
-                {
-                    currentCredential.name = line.substr(namePos + 5);
-                }
-                size_t secretPos = line.find("secret:");
-                if (secretPos != std::string::npos)
-                {
-                    currentCredential.secret = line.substr(secretPos + 7);
-                    credentials.push_back(currentCredential);
-                }
-            }
-            if (options.count("-c"))
-            {
-                std::cout << "not support." << std::endl;
-            }
-            
-            if(!credentials.empty())
-            {
-                for(const auto& credential : credentials)
-                {
-                    std::cout << "Name: " << credential.name << ", Token: " << auth::generateToken(credential.secret) << "\n";
-                }
-            }
-            inputFile.close();
-        }
-        if (options.count("-a"))
-        {
-            std::fstream cfile;
-            cfile.open(fileName, std::ios::out | std::ios::app);
-            cfile << "name:" << options["-a"] << std::endl;
-            std::cout << "Please enter your token:";
-            std::cin >> secret;
-            cfile << "secret:" << secret << std::endl;
-            cfile.close();
-
-            if (options.count("-c"))
-            {
-                std::ostringstream oss;
-                oss << auth::generateToken(secret);
-                std::string secretStr = oss.str();
-                copyToClipboard(secretStr);
-            }
-            std::cout << "your dynamic token:" << auth::generateToken(secret) << std::endl;
-        }
-        if (options.count("-l"))
-        {
-            std::ifstream inputFile(fileName);
-            if (!inputFile.is_open())
-            {
-                std::cerr << "Unable to open the file." << std::endl;
-            }
-            std::string line;
-            std::string currentName, allNames;
-
-            while (std::getline(inputFile, line))
-            {
-                size_t namePos = line.find("name:");
-                if (namePos != std::string::npos)
-                {
-                    currentName = line.substr(namePos + 5); // 5 是 "name:" 的长度
-                    allNames += currentName + "\n";
-                }
-            }
-            inputFile.close();
-
-            // 检查最后换行
-            if (!allNames.empty() && allNames.back() == '\n')
-            {
-                allNames.pop_back();
-            }
-
-            if (!fileName.empty())
-            {
-                std::cout << "Name found: \n" << allNames << std::endl;
-            }
-            else
-            {
-                std::cout << "Name not found in the file." << std::endl;
-            }
-        }
-        if (options.count("-n"))
-        {
-            std::string targetName;
-            std::string foundSecret; // 用于存储找到的secret值
-            targetName = /*"dfsfs";*/ options["-n"];
-            std::ifstream inputFile(fileName);
-            if (!inputFile.is_open())
-            {
-                std::cerr << "Unable to open the file." << std::endl;
-            }
-            std::string line;
-            std::string currentName;
-
-            while (std::getline(inputFile, line))
-            {
-                size_t namePos = line.find("name:");
-                if (namePos != std::string::npos)
-                {
-                    std::string currentName = line.substr(namePos + 5); // 5 是 "name:" 的长度
-                    if (currentName == targetName)
-                    {
-                        // 找到目标名字后，继续查找对应的secret值
-                        while (std::getline(inputFile, line))
-                        {
-                            size_t secretPos = line.find("secret:");
-                            if (secretPos != std::string::npos)
-                            {
-                                foundSecret = line.substr(secretPos + 7); // 7 是 "secret:" 的长度
-                                break;                                    // 找到secret值后，结束循环
-                            }
-                        }
-                        break; // 结束外层循环
-                    }
-                }
-            }
-            if (options.count("-c"))
-            {
-                std::ostringstream oss;
-                oss << auth::generateToken(foundSecret);
-                std::string secretStr = oss.str();
-                copyToClipboard(secretStr);
-            }
-            std::cout << "your dynamic token:" << auth::generateToken(foundSecret) << std::endl;
-            showCountdown();
-            inputFile.close();
-        }
+        std::cout << parser.usage() << std::endl;
+        return 0;
     }
-    else
+
+    if (parser.exist("ls"))
     {
+        std::ifstream inputFile(fileName);
+        if (!inputFile.is_open())
+        {
+            std::cerr << "Unable to open the file." << std::endl;
+        }
+        std::string line;
+        std::string currentName, allNames;
+
+        while (std::getline(inputFile, line))
+        {
+            size_t namePos = line.find("name:");
+            if (namePos != std::string::npos)
+            {
+                currentName = line.substr(namePos + 5); // 5 是 "name:" 的长度
+                allNames += currentName + "\n";
+            }
+        }
+        inputFile.close();
+
+        // 检查最后换行
+        if (!allNames.empty() && allNames.back() == '\n')
+        {
+            allNames.pop_back();
+        }
+
+        if (!fileName.empty())
+        {
+            std::cout << "Name found: \n" << allNames << std::endl;
+        }
+        else
+        {
+            std::cout << "Name not found in the file." << std::endl;
+        }
+        return 0;
+    }
+
+    if (parser.exist("values"))
+    {
+        struct Credential
+        {
+            std::string name;
+            std::string secret;
+        };
+        std::ifstream inputFile(fileName);
+        std::vector<Credential> credentials;
+
+        if (!inputFile.is_open())
+        {
+            std::cerr << "Unable to open the file." << std::endl;
+        }
+        
+        std::string line;
+        Credential currentCredential;
+
+        while (std::getline(inputFile, line))
+        {
+            size_t namePos = line.find("name:");
+            if (namePos != std::string::npos)
+            {
+                currentCredential.name = line.substr(namePos + 5);
+            }
+            size_t secretPos = line.find("secret:");
+            if (secretPos != std::string::npos)
+            {
+                currentCredential.secret = line.substr(secretPos + 7);
+                credentials.push_back(currentCredential);
+            }
+        }
+        inputFile.close();
+
+        if (parser.exist("copy"))
+        {
+            std::cout << "Copy is not supported here." << std::endl;
+        }
+        
+        if(!credentials.empty())
+        {
+            for(const auto& credential : credentials)
+            {
+                std::cout << "Name: " << credential.name << ", Token: " << auth::generateToken(credential.secret) << "\n";
+            }
+        }
+        return 0;
+    }
+
+    if (""!=parser.get<std::string>("auth"))
+    {
+        std::fstream cfile;
+        cfile.open(fileName, std::ios::out | std::ios::app);
+        cfile << "name:" << parser.get<std::string>("auth") << std::endl;
         std::cout << "Please enter your token:";
         std::cin >> secret;
-        std::cout << "Whether to save(yes/no)?";
-        std::string save;
-        std::cin >> save;
-        if (save == "yes" || save == "y")
+        cfile << "secret:" << secret << std::endl;
+        cfile.close();
+
+        if (parser.exist("copy"))
         {
-            std::fstream cfile;
-            cfile.open(fileName, std::ios::out | std::ios::app);
-            std::string Name;
-            std::cout << "the name you wish to save:";
-            std::cin >> Name;
-            cfile << "name:" << Name << std::endl;
-            cfile << "secret:" << secret << std::endl;
-            cfile.close();
+            std::ostringstream oss;
+            oss << auth::generateToken(secret);
+            std::string secretStr = oss.str();
+            copyToClipboard(secretStr);
         }
         std::cout << "your dynamic token:" << auth::generateToken(secret) << std::endl;
+        return 0;
     }
+
+    if (""!=parser.get<std::string>("name"))
+    {
+        std::string targetName;
+        std::string foundSecret; // 用于存储找到的secret值
+        targetName = parser.get<std::string>("name");
+        std::ifstream inputFile(fileName);
+        if (!inputFile.is_open())
+        {
+            std::cerr << "Unable to open the file." << std::endl;
+        }
+        std::string line;
+        std::string currentName;
+
+        while (std::getline(inputFile, line))
+        {
+            size_t namePos = line.find("name:");
+            if (namePos != std::string::npos)
+            {
+                std::string currentName = line.substr(namePos + 5); // 5 是 "name:" 的长度
+                if (currentName == targetName)
+                {
+                    // 找到目标名字后，继续查找对应的secret值
+                    while (std::getline(inputFile, line))
+                    {
+                        size_t secretPos = line.find("secret:");
+                        if (secretPos != std::string::npos)
+                        {
+                            foundSecret = line.substr(secretPos + 7); // 7 是 "secret:" 的长度
+                            break;                                    // 找到secret值后，结束循环
+                        }
+                    }
+                    break; // 结束外层循环
+                }
+            }
+        }
+        inputFile.close();
+        if (parser.exist("copy"))
+        {
+            std::ostringstream oss;
+            oss << auth::generateToken(foundSecret);
+            std::string secretStr = oss.str();
+            copyToClipboard(secretStr);
+        }
+        std::cout << "your dynamic token:" << auth::generateToken(foundSecret) << std::endl;
+        showCountdown();
+        return 0;
+    }
+
+    std::cout << "Please enter your token:";
+    std::cin >> secret;
+    std::cout << "Whether to save(yes/no)?";
+    std::string save;
+    std::cin >> save;
+    if (save == "yes" || save == "y")
+    {
+        std::fstream cfile;
+        cfile.open(fileName, std::ios::out | std::ios::app);
+        std::string Name;
+        std::cout << "the name you wish to save:";
+        std::cin >> Name;
+        cfile << "name:" << Name << std::endl;
+        cfile << "secret:" << secret << std::endl;
+        cfile.close();
+    }
+    std::cout << "your dynamic token:" << auth::generateToken(secret) << std::endl;
 
     return 0;
 }
